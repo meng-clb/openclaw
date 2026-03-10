@@ -1,4 +1,8 @@
 import type { GatewayRpcOpts } from "./gateway-rpc.js";
+import { fetchBrowserJson } from "../browser/client-fetch.js";
+import { deriveDefaultBrowserControlPort } from "../config/port-defaults.js";
+import { resolveGatewayPort } from "../config/paths.js";
+import { loadConfig } from "../config/config.js";
 import { callGatewayFromCli } from "./gateway-rpc.js";
 
 export type BrowserParentOpts = GatewayRpcOpts & {
@@ -27,6 +31,54 @@ function normalizeQuery(query: BrowserRequestParams["query"]): Record<string, st
   return Object.keys(out).length ? out : undefined;
 }
 
+function shouldUseLocalBrowserControl(opts: BrowserParentOpts): boolean {
+  if (typeof opts.url === "string" && opts.url.trim().length > 0) {
+    return false;
+  }
+  if (typeof process.env.OPENCLAW_GATEWAY_URL === "string" && process.env.OPENCLAW_GATEWAY_URL.trim()) {
+    return false;
+  }
+  if (typeof process.env.CLAWDBOT_GATEWAY_URL === "string" && process.env.CLAWDBOT_GATEWAY_URL.trim()) {
+    return false;
+  }
+  const cfg = loadConfig();
+  return cfg.gateway?.mode !== "remote";
+}
+
+function buildLocalBrowserControlUrl(params: BrowserRequestParams): string {
+  const cfg = loadConfig();
+  const gatewayPort = resolveGatewayPort(cfg, process.env);
+  const controlPort = deriveDefaultBrowserControlPort(gatewayPort);
+  const url = new URL(`http://127.0.0.1:${controlPort}`);
+  url.pathname = params.path.startsWith("/") ? params.path : `/${params.path}`;
+  for (const [key, value] of Object.entries(normalizeQuery(params.query) ?? {})) {
+    url.searchParams.set(key, value);
+  }
+  return url.toString();
+}
+
+async function callLocalBrowserControl<T>(
+  opts: BrowserParentOpts,
+  params: BrowserRequestParams,
+  timeoutMs: number | undefined,
+): Promise<T> {
+  const headers = new Headers();
+  let body: string | undefined;
+  if (params.body !== undefined) {
+    headers.set("Content-Type", "application/json");
+    body = JSON.stringify(params.body);
+  }
+  if (typeof opts.token === "string" && opts.token.trim().length > 0) {
+    headers.set("Authorization", `Bearer ${opts.token.trim()}`);
+  }
+  return await fetchBrowserJson<T>(buildLocalBrowserControlUrl(params), {
+    method: params.method,
+    headers,
+    body,
+    timeoutMs,
+  });
+}
+
 export async function callBrowserRequest<T>(
   opts: BrowserParentOpts,
   params: BrowserRequestParams,
@@ -42,6 +94,9 @@ export async function callBrowserRequest<T>(
     typeof resolvedTimeoutMs === "number" && Number.isFinite(resolvedTimeoutMs)
       ? resolvedTimeoutMs
       : undefined;
+  if (shouldUseLocalBrowserControl(opts)) {
+    return await callLocalBrowserControl<T>(opts, params, resolvedTimeout);
+  }
   const timeout = typeof resolvedTimeout === "number" ? String(resolvedTimeout) : opts.timeout;
   const payload = await callGatewayFromCli(
     "browser.request",

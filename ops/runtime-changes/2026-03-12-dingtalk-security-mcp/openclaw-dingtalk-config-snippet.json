@@ -1,0 +1,65 @@
+{
+  "agents": {
+    "list": [
+      {
+        "id": "workspace-ddtalk",
+        "skills": ["dingtalk-ai-table"]
+      },
+      {
+        "id": "workspace-ddtalk-group",
+        "workspace": "/root/.openclaw/workspace-ddtalk-group",
+        "agentDir": "/root/.openclaw/agents/workspace-ddtalk-group/agent",
+        "skills": ["dingtalk-ai-table-group"],
+        "tools": {
+          "allow": ["session_status", "exec"],
+          "deny": ["read", "write", "edit", "apply_patch", "process"],
+          "exec": {
+            "host": "gateway",
+            "security": "allowlist",
+            "ask": "off",
+            "pathPrepend": ["/root/.openclaw/bin"],
+            "safeBins": ["dingtalk-mcp-ro"],
+            "safeBinTrustedDirs": ["/root/.openclaw/bin"],
+            "safeBinProfiles": {
+              "dingtalk-mcp-ro": {
+                "minPositional": 1,
+                "maxPositional": 12,
+                "allowedValueFlags": ["--args", "-a"]
+              }
+            }
+          },
+          "fs": {
+            "workspaceOnly": true
+          }
+        }
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "type": "route",
+      "agentId": "workspace-ddtalk",
+      "match": {
+        "channel": "dingtalk",
+        "peer": {
+          "kind": "direct",
+          "id": "161054433038257862"
+        }
+      }
+    },
+    {
+      "type": "route",
+      "agentId": "workspace-ddtalk-group",
+      "match": {
+        "channel": "dingtalk"
+      }
+    }
+  ],
+  "channels": {
+    "dingtalk": {
+      "dmPolicy": "allowlist",
+      "groupPolicy": "open",
+      "allowFrom": ["161054433038257862"]
+    }
+  }
+}

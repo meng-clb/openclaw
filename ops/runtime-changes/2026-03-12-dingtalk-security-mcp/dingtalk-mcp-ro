@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly SERVER_NAME="dingtalk-ai-table"
+readonly PRIMARY_MCPORTER_BIN="/root/.nvm/versions/node/v22.18.0/bin/mcporter"
+readonly PRIMARY_MCPORTER_DIR="/root/.nvm/versions/node/v22.18.0/bin"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  dingtalk-mcp-ro schema
+  dingtalk-mcp-ro call <tool_name> [--args <json>]
+
+Notes:
+  - Only the configured dingtalk-ai-table server is allowed.
+  - Local config/auth/daemon/file-generation commands are blocked.
+  - Prefer --args with a single JSON object for tool input.
+EOF
+}
+
+die() {
+  printf 'dingtalk-mcp-ro: %s\n' "$*" >&2
+  exit 2
+}
+
+resolve_mcporter_bin() {
+  if [[ -x "$PRIMARY_MCPORTER_BIN" ]]; then
+    printf '%s\n' "$PRIMARY_MCPORTER_BIN"
+    return 0
+  fi
+
+  PATH="$PRIMARY_MCPORTER_DIR:$PATH"
+  local resolved=""
+  resolved="$(command -v mcporter || true)"
+  if [[ -n "$resolved" ]]; then
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+
+  return 1
+}
+
+require_safe_tool_name() {
+  local tool_name="$1"
+  if [[ ! "$tool_name" =~ ^[A-Za-z0-9_]+$ ]]; then
+    die "invalid tool name: $tool_name"
+  fi
+}
+
+require_safe_literal() {
+  local value="$1"
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* || "$value" == *$'\0'* ]]; then
+    die "arguments must not contain newlines or NUL bytes"
+  fi
+  if [[ "$value" == --* ]]; then
+    die "unsupported flag: $value"
+  fi
+}
+
+main() {
+  local mcporter_bin=""
+  mcporter_bin="$(resolve_mcporter_bin)" || die "mcporter not found"
+
+  if [[ $# -lt 1 ]]; then
+    usage
+    exit 2
+  fi
+
+  local subcommand="$1"
+  shift
+
+  case "$subcommand" in
+    schema)
+      if [[ $# -ne 0 ]]; then
+        die "schema does not accept extra arguments"
+      fi
+      exec "$mcporter_bin" list "$SERVER_NAME" --schema
+      ;;
+    call)
+      if [[ $# -lt 1 ]]; then
+        die "call requires a tool name"
+      fi
+
+      local tool_name="$1"
+      shift
+      require_safe_tool_name "$tool_name"
+
+      local call_args=("$mcporter_bin" call "$SERVER_NAME" "$tool_name")
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --args|-a)
+            if [[ $# -lt 2 ]]; then
+              die "$1 requires a JSON value"
+            fi
+            call_args+=("--args" "$2")
+            shift 2
+            ;;
+          *)
+            require_safe_literal "$1"
+            call_args+=("$1")
+            shift
+            ;;
+        esac
+      done
+
+      call_args+=("--output" "json")
+      exec "${call_args[@]}"
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      die "unsupported command: $subcommand"
+      ;;
+  esac
+}
+
+main "$@"
